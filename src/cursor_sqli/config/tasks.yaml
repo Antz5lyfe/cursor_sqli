@@ -1,0 +1,73 @@
+reconnaissance_task:
+  description: >
+    Analyze the target website at {target_url} to gather detailed information about its structure and potential SQL injection points.
+    Specifically:
+    1. Identify all entry points for SQL injection (forms, URL parameters, cookies, etc.) using both Chrome and Firefox browsers
+    2. Map the website's structure and navigation paths
+    3. Detect the presence of any web application firewalls (WAFs)
+    4. Identify the technologies being used (server type, frameworks, etc.)
+  expected_output: >
+    A detailed report containing:
+    - List of potential SQL injection entry points with their locations
+    - Website structure map
+    - Detected security mechanisms (WAFs, input sanitization)
+    - Identified technologies and frameworks
+  agent: reconnaissance_agent
+
+scanning_task:
+  description: >
+    Analyze the entry points identified by the reconnaissance agent to determine if they are vulnerable to SQL injection.
+    For each potential injection point:
+    1. Test with various basic SQL injection payloads
+    2. Analyze server responses for error messages or anomalous behavior
+    3. Determine the type of database being used (MySQL, PostgreSQL, etc.)
+    4. Assess the level of vulnerability (high, medium, low)
+  expected_output: >
+    A comprehensive vulnerability report including:
+    - Confirmed vulnerable entry points
+    - Database type and version if determinable
+    - Error messages or behavior patterns observed
+    - Vulnerability assessment for each entry point
+  agent: scanner_agent
+  dependencies: [reconnaissance_task]
+
+payload_generation_task:
+  description: >
+    Create optimized SQL injection payloads based on the vulnerabilities identified by the scanner agent.
+    For each confirmed vulnerable point:
+    1. Generate payloads specific to the database type
+    2. Create payloads for different attack goals (data extraction, authentication bypass, etc.)
+    3. Encode payloads to evade WAFs if detected
+    4. Optimize payloads for the specific vulnerability context
+  expected_output: >
+    A collection of SQL injection payloads including:
+    - Database-specific injection strings
+    - Payloads for different attack vectors
+    - WAF evasion techniques applied
+    - Usage instructions for each payload
+  agent: payload_generator_agent
+  dependencies: [scanning_task]
+
+execution_task:
+  description: >
+    Execute the generated payloads against the vulnerable target using Firefox browser automation.
+    For each payload:
+    1. Open a Firefox browser window (in visible mode if specified via --visible)
+    2. Navigate to the vulnerable web page
+    3. Handle any popups or alerts that appear
+    4. Locate and identify the vulnerable input fields
+    5. Input the generated SQL injection payloads
+    6. Submit the form or trigger the action
+    7. Capture and analyze the server response
+    
+    The browser will be launched in visible mode if the --visible flag is provided,
+    allowing you to see the injection process in real-time. Additional delay can be
+    added between actions with the --delay parameter.
+  expected_output: >
+    An execution report containing:
+    - Results of each injection attempt using Firefox
+    - Successful extractions or modifications
+    - Screenshots or captured responses
+    - Evidence of successful exploitation
+  agent: executor_agent
+  dependencies: [payload_generation_task]

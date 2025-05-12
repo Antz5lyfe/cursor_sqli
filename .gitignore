@@ -1,0 +1,15 @@
+# Virtual Environment
+venv
+.venv
+
+# Env Files
+.env
+
+# Python Cache
+__pycache__/
+.DS_Store
+*.py[cod]
+
+# Agent Reports
+*.md
+!README.md
