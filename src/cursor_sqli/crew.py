@@ -79,7 +79,7 @@ class CursorSqli():
             entry_point = {
                 'type': 'form_input',
                 'form_fields': {
-                    'email': 'input[type="email"]',  
+                    'username': 'input[type="email"]',  
                     'password': 'input[type="password"]'
                 }
             }
@@ -99,11 +99,14 @@ class CursorSqli():
             - DO NOT use dictionary values where string values are expected
             - If you see "invalid type: map, expected a string" error, switch to auto-detection format
             
-            For payloads, use one of these common SQL injection strings:
-            - "' OR '1'='1"
-            - "' OR '1'='1' --"
-            - "admin' --"
-            - "1' OR 1=1 --"
+            IMPORTANT ABOUT PAYLOADS:
+            - Custom payloads from custom_payloads.yaml will be used exactly as written
+            - Payloads are NOT modified for password fields - they are used exactly as provided
+            - If custom_payloads.yaml doesn't exist or is empty, use these common SQL injection payloads:
+              - "' OR '1'='1"
+              - "' OR '1'='1' --"
+              - "admin' --"
+              - "1' OR 1=1 --"
             
             Always set visible_mode to true when the --visible flag is provided with the command.
             """,

