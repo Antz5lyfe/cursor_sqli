@@ -626,61 +626,19 @@ class FirefoxBrowserAutomationTool(BaseTool):
             logger.info(f"Starting Firefox browser automation for URL: {target_url}")
             # Set up Firefox options
             firefox_options = FirefoxOptions()
-            
-            # Only use headless mode if not in visible mode
             if not visible_mode:
                 firefox_options.add_argument("--headless")
-                logger.info("Running Firefox in headless mode")
-            else:
-                logger.info("Running Firefox in visible mode - you will see the browser window")
             
-            firefox_options.add_argument("--width=1920")
-            firefox_options.add_argument("--height=1080")
+            # Set up the Firefox driver
+            service = FirefoxService(GeckoDriverManager().install())
+            driver = webdriver.Firefox(service=service, options=firefox_options)
             
-            # Add user agent to appear more like a regular browser
-            firefox_options.set_preference("general.useragent.override", 
-                                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0")
+            # Navigate to the target URL
+            logger.info(f"Navigating to {target_url}")
+            driver.get(target_url)
             
-            # Disable unwanted features
-            firefox_options.set_preference("browser.tabs.remote.autostart", False)
-            firefox_options.set_preference("browser.tabs.remote.autostart.2", False)
-            
-            # Disable notifications prompts
-            firefox_options.set_preference("permissions.default.desktop-notification", 2)
-            firefox_options.set_preference("dom.webnotifications.enabled", False)
-            firefox_options.set_preference("dom.push.enabled", False)
-            
-            # Handle certificate errors
-            firefox_options.accept_insecure_certs = True
-            firefox_options.set_preference("security.insecure_connection_text.enabled", False)
-            
-            logger.info("Setting up Firefox WebDriver")
-            # Set up the WebDriver with error handling
-            try:
-                # Check if we're on Windows to handle the selenium service properly
-                if platform.system() == "Windows":
-                    # On Windows, use log_path=os.devnull to prevent console errors
-                    service = FirefoxService(GeckoDriverManager().install(), log_path=os.devnull)
-                else:
-                    service = FirefoxService(GeckoDriverManager().install())
-                
-                driver = webdriver.Firefox(service=service, options=firefox_options)
-                logger.info("Firefox WebDriver initialized successfully")
-            except WebDriverException as e:
-                logger.error(f"Failed to initialize Firefox WebDriver: {str(e)}")
-                return f"Error: Firefox WebDriver initialization failed: {str(e)}"
-            
-            # Navigate to the URL with timeout and error handling
-            try:
-                logger.info(f"Navigating to URL: {target_url}")
-                driver.set_page_load_timeout(15)  # 15 second timeout for page load
-                driver.get(target_url)
-                logger.info("Successfully loaded the page")
-            except Exception as e:
-                logger.error(f"Failed to load URL {target_url}: {str(e)}")
-                if driver:
-                    driver.quit()
-                return f"Error: Failed to load URL {target_url}: {str(e)}"
+            # Wait for the page to load
+            time.sleep(2)
             
             # Handle any initial alerts or popups
             self._handle_alerts_and_popups(driver, popup_timeout)
@@ -697,49 +655,142 @@ class FirefoxBrowserAutomationTool(BaseTool):
             form_fields = entry_point.get('form_fields', {})
             
             # If we have empty selector and no form_fields, try to auto-detect form fields
-            if entry_type == 'form_input' and not selector and not form_fields:
+            if not selector and not form_fields:
                 logger.info("No selector or form_fields provided, attempting to auto-detect login form fields")
                 form_fields = self._auto_detect_form_fields(driver)
                 if form_fields:
                     logger.info(f"Auto-detected form fields: {list(form_fields.keys())}")
-                else:
-                    logger.warning("Failed to auto-detect form fields, will look for a generic text input")
-                    selector = 'input[type="text"]'
-                    
-            # Check if we have form_fields instead of a single selector
-            if entry_type == 'form_input' and form_fields:
-                logger.info(f"Using form_fields mode with fields: {list(form_fields.keys())}")
-                # Try different payloads if the first one fails
-                injection_result = self._execute_with_multiple_payloads(
+                    return self._execute_form_fields_injection(
+                        driver, form_fields, payload, capture_screenshot, max_retries, popup_timeout
+                    )
+            
+            # If form_fields are provided, use them
+            if form_fields:
+                logger.info("Using provided form fields for injection")
+                return self._execute_form_fields_injection(
                     driver, form_fields, payload, capture_screenshot, max_retries, popup_timeout
                 )
-            else:
-                logger.info(f"Executing injection via {entry_type} at {selector}")
-                # Execute the injection based on entry type
-                injection_result = self._execute_injection(
-                    driver, entry_type, selector, selector_type, payload, capture_screenshot, max_retries, popup_timeout
-                )
-                
-            # Clean up
-            logger.info("Closing Firefox browser")
-            driver.quit()
             
-            return injection_result
+            # If we have a selector but no form_fields, try to detect the form structure
+            if selector:
+                try:
+                    # First try to find the element directly
+                    element = None
+                    try:
+                        if selector_type == 'css':
+                            element = driver.find_element(By.CSS_SELECTOR, selector)
+                        elif selector_type == 'xpath':
+                            element = driver.find_element(By.XPATH, selector)
+                        elif selector_type == 'id':
+                            element = driver.find_element(By.ID, selector)
+                        else:
+                            logger.warning(f"Unknown selector type '{selector_type}', defaulting to CSS")
+                            element = driver.find_element(By.CSS_SELECTOR, selector)
+                    except NoSuchElementException:
+                        pass
+                    
+                    # If element found, check if it's part of a form
+                    if element:
+                        # Try to find parent form or form container
+                        form = None
+                        try:
+                            # Try direct parent form first
+                            form = element.find_element(By.XPATH, "./ancestor::form")
+                        except NoSuchElementException:
+                            try:
+                                # Try finding form by ID reference
+                                form_id = element.get_attribute('form')
+                                if form_id:
+                                    form = driver.find_element(By.ID, form_id)
+                            except NoSuchElementException:
+                                # If no form found, look for common login form containers
+                                containers = driver.find_elements(By.CSS_SELECTOR, 
+                                    '#login-form, .login-form, [id*="login-container"], [class*="login-container"]')
+                                if containers:
+                                    form = containers[0]
+                        
+                        if form:
+                            logger.info("Found parent form/container, attempting to detect all form fields")
+                            # Try to detect all fields in the form
+                            form_fields = {}
+                            
+                            # Store the form container reference
+                            form_fields['form_container'] = form.get_attribute('id') or form.get_attribute('class')
+                            
+                            # Add the originally targeted field
+                            field_type = element.get_attribute('type') or 'text'
+                            if field_type == 'password':
+                                form_fields['password'] = selector
+                            else:
+                                form_fields['username'] = selector
+                            
+                            # Look for other fields in the same form
+                            if field_type != 'password':
+                                # Look for password field
+                                try:
+                                    password_field = form.find_element(By.CSS_SELECTOR, 'input[type="password"]')
+                                    form_fields['password'] = 'input[type="password"]'
+                                except NoSuchElementException:
+                                    pass
+                            else:
+                                # Look for username/email field
+                                for username_selector in [
+                                    'input[type="text"]', 'input[type="email"]',
+                                    'input[name*="user"]', 'input[name*="email"]',
+                                    'input[id*="user"]', 'input[id*="email"]'
+                                ]:
+                                    try:
+                                        username_field = form.find_element(By.CSS_SELECTOR, username_selector)
+                                        if username_field.is_displayed() and username_field.is_enabled():
+                                            form_fields['username'] = username_selector
+                                            break
+                                    except NoSuchElementException:
+                                        continue
+                            
+                            if len(form_fields) > 1:  # More than just the form_container
+                                logger.info(f"Detected multiple form fields: {list(form_fields.keys())}")
+                                return self._execute_form_fields_injection(
+                                    driver, form_fields, payload, capture_screenshot, max_retries, popup_timeout
+                                )
+                    
+                    # If we couldn't detect a form structure, fall back to single field injection
+                    logger.info("No form structure detected, falling back to single field injection")
+                    return self._execute_injection(
+                        driver, entry_type, selector, selector_type, payload, 
+                        capture_screenshot, max_retries, popup_timeout
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error during form structure detection: {str(e)}")
+                    # Fall back to single field injection
+                    return self._execute_injection(
+                        driver, entry_type, selector, selector_type, payload,
+                        capture_screenshot, max_retries, popup_timeout
+                    )
+            
+            # If we get here, we have no selector and couldn't auto-detect fields
+            logger.warning("No valid entry point found, attempting to find any input field")
+            selector = 'input[type="text"]'  # Default to a common input type
+            return self._execute_injection(
+                driver, 'form_input', selector, 'css', payload,
+                capture_screenshot, max_retries, popup_timeout
+            )
             
         except Exception as e:
-            logger.error(f"Error during Firefox browser automation: {str(e)}")
+            error_msg = f"Error during browser automation: {str(e)}"
+            logger.error(error_msg)
             if driver:
                 try:
-                    # Take screenshot of error state if possible
-                    screenshot_dir = "screenshots"
-                    os.makedirs(screenshot_dir, exist_ok=True)
-                    error_screenshot = f"{screenshot_dir}/error_firefox_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
-                    driver.save_screenshot(error_screenshot)
-                    logger.info(f"Error state screenshot saved to {error_screenshot}")
+                    driver.quit()
                 except:
-                    logger.error("Failed to capture error screenshot")
-                driver.quit()
-            return f"Error during Firefox browser automation: {str(e)}"
+                    pass
+            return error_msg
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
 
     def _auto_detect_form_fields(self, driver):
         """
@@ -754,41 +805,107 @@ class FirefoxBrowserAutomationTool(BaseTool):
         logger.info("Attempting to auto-detect form fields")
         form_fields = {}
         
-        # Common selectors for username/email fields
+        # Common selectors for username/email fields (in order of preference)
         username_selectors = [
-            'input[type="text"][name*="user"]', 'input[type="text"][name*="email"]', 
+            # By input type and name
+            'input[type="text"][name*="user"]', 'input[type="text"][name*="email"]',
             'input[type="email"]', 'input[name*="user"]', 'input[name*="email"]',
-            'input[id*="user"]', 'input[id*="email"]', 'input[placeholder*="user"]', 
-            'input[placeholder*="email"]', 'input[placeholder*="Email"]', 'input[placeholder*="Username"]'
+            # By ID
+            'input[id*="user"]', 'input[id*="email"]', 'input[id*="username"]', 'input[id*="login"]',
+            # By placeholder
+            'input[placeholder*="user"]', 'input[placeholder*="email"]', 
+            'input[placeholder*="Email"]', 'input[placeholder*="Username"]',
+            # By class
+            'input[class*="user"]', 'input[class*="email"]', 'input[class*="login"]',
+            # By aria-label
+            'input[aria-label*="user" i]', 'input[aria-label*="email" i]', 'input[aria-label*="username" i]',
+            # Generic text inputs within login forms
+            '#login-form input[type="text"]', '.login-form input[type="text"]',
+            'form[id*="login"] input[type="text"]', 'form[class*="login"] input[type="text"]',
+            'div[id*="login"] input[type="text"]', 'div[class*="login"] input[type="text"]'
         ]
         
-        # Common selectors for password fields
+        # Common selectors for password fields (in order of preference)
         password_selectors = [
-            'input[type="password"]', 'input[name*="pass"]', 'input[id*="pass"]',
-            'input[placeholder*="password"]', 'input[placeholder*="Password"]'
+            # By type
+            'input[type="password"]',
+            # By name
+            'input[name*="pass"]', 'input[name*="pwd"]',
+            # By ID
+            'input[id*="pass"]', 'input[id*="pwd"]', 'input[id*="password"]',
+            # By placeholder
+            'input[placeholder*="password"]', 'input[placeholder*="Password"]',
+            # By class
+            'input[class*="password"]', 'input[class*="pass"]',
+            # By aria-label
+            'input[aria-label*="password" i]',
+            # Generic password inputs within login forms
+            '#login-form input[type="password"]', '.login-form input[type="password"]',
+            'form[id*="login"] input[type="password"]', 'form[class*="login"] input[type="password"]',
+            'div[id*="login"] input[type="password"]', 'div[class*="login"] input[type="password"]'
         ]
         
         # Try to find username/email field
         for selector in username_selectors:
             try:
                 elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements and elements[0].is_displayed():
-                    logger.info(f"Found username/email field with selector: {selector}")
-                    form_fields['username'] = selector  # Changed from 'email' to 'username' for clarity
+                for element in elements:
+                    if element.is_displayed() and element.is_enabled():
+                        logger.info(f"Found username/email field with selector: {selector}")
+                        form_fields['username'] = selector
+                        break
+                if 'username' in form_fields:
                     break
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Error finding username field with selector {selector}: {str(e)}")
                 continue
         
         # Try to find password field
         for selector in password_selectors:
             try:
                 elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements and elements[0].is_displayed():
-                    logger.info(f"Found password field with selector: {selector}")
-                    form_fields['password'] = selector
+                for element in elements:
+                    if element.is_displayed() and element.is_enabled():
+                        logger.info(f"Found password field with selector: {selector}")
+                        form_fields['password'] = selector
+                        break
+                if 'password' in form_fields:
                     break
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Error finding password field with selector {selector}: {str(e)}")
                 continue
+        
+        # If we found fields, try to find their common ancestor form
+        if form_fields:
+            try:
+                # Get the first found field
+                first_field_selector = next(iter(form_fields.values()))
+                first_field = driver.find_element(By.CSS_SELECTOR, first_field_selector)
+                
+                # Try to find the form element
+                form = None
+                try:
+                    # Try direct parent form first
+                    form = first_field.find_element(By.XPATH, "./ancestor::form")
+                except NoSuchElementException:
+                    try:
+                        # Try finding form by ID reference
+                        form_id = first_field.get_attribute('form')
+                        if form_id:
+                            form = driver.find_element(By.ID, form_id)
+                    except NoSuchElementException:
+                        # If no form found, look for common login form containers
+                        containers = driver.find_elements(By.CSS_SELECTOR, 
+                            '#login-form, .login-form, [id*="login-container"], [class*="login-container"]')
+                        if containers:
+                            form = containers[0]
+                
+                if form:
+                    logger.info("Found parent form/container for the login fields")
+                    # Store the form ID or a reference for later use
+                    form_fields['form_container'] = form.get_attribute('id') or form.get_attribute('class')
+            except Exception as e:
+                logger.warning(f"Error finding parent form: {str(e)}")
         
         # Log the detected fields
         if form_fields:
@@ -866,9 +983,15 @@ class FirefoxBrowserAutomationTool(BaseTool):
             logger.info(f"Trying payload {i+1}/{len(payloads)}: {payload}")
             result['payloads_tried'].append(payload)
             
+            # Create a copy of form_fields with the same payload for all fields
+            injection_fields = {}
+            for field_name, selector in form_fields.items():
+                if field_name != 'form_container':  # Skip the form container
+                    injection_fields[field_name] = selector
+            
             # Execute the injection with this payload
             injection_result = self._execute_form_fields_injection(
-                driver, form_fields, payload, capture_screenshot, max_retries, popup_timeout
+                driver, injection_fields, payload, capture_screenshot, max_retries, popup_timeout
             )
             
             # Parse the result
@@ -883,13 +1006,14 @@ class FirefoxBrowserAutomationTool(BaseTool):
                     # Check if we're still on a page with the form
                     found_form = False
                     for field_name, selector in form_fields.items():
-                        try:
-                            elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                            if elements and elements[0].is_displayed():
-                                found_form = True
-                                break
-                        except:
-                            pass
+                        if field_name != 'form_container':  # Skip the form container
+                            try:
+                                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                                if elements and elements[0].is_displayed():
+                                    found_form = True
+                                    break
+                            except:
+                                pass
                     
                     # If we're not on the form page anymore, navigate back to the original URL
                     if not found_form:
@@ -985,264 +1109,138 @@ class FirefoxBrowserAutomationTool(BaseTool):
         """
         Execute injection when multiple form fields are provided instead of a single selector.
         This is useful for login forms with username and password fields.
-        
-        Args:
-            driver: Selenium WebDriver instance
-            form_fields: Dictionary mapping field names to their selectors
-            payload: SQL injection payload to inject
-            capture_screenshot: Whether to capture screenshots
-            max_retries: Number of retry attempts
-            popup_timeout: Timeout for popup detection
-        
-        Returns:
-            Formatted result string
         """
         result = {
             'success': False,
             'response_text': '',
             'screenshot_path': None,
-            'error_message': None
+            'error_message': None,
+            'payloads_used': {}  # Track which payload was used for each field
         }
-        
+
         for attempt in range(max_retries):
             try:
                 logger.info(f"Form fields injection attempt {attempt+1}/{max_retries}")
-                
-                # Handle any alerts or popups before looking for elements
                 self._handle_alerts_and_popups(driver, popup_timeout)
-                
-                # Flag to track if we found and filled all fields
+
                 all_fields_found = True
-                
-                # Find and fill each form field
+                last_field_element = None
+
                 for field_name, field_selector in form_fields.items():
-                    logger.info(f"Looking for field '{field_name}' with selector '{field_selector}'")
-                    
-                    try:
-                        # Try CSS selector first
-                        try:
-                            field_element = WebDriverWait(driver, 3).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, field_selector))
-                            )
-                        except (TimeoutException, NoSuchElementException):
-                            # Try by ID
-                            try:
-                                field_element = WebDriverWait(driver, 2).until(
-                                    EC.presence_of_element_located((By.ID, field_selector))
-                                )
-                            except (TimeoutException, NoSuchElementException):
-                                # Try by name attribute
-                                try:
-                                    field_element = WebDriverWait(driver, 2).until(
-                                        EC.presence_of_element_located((By.NAME, field_selector))
-                                    )
-                                except (TimeoutException, NoSuchElementException):
-                                    # Try XPath for input with matching placeholder
-                                    try:
-                                        field_element = WebDriverWait(driver, 2).until(
-                                            EC.presence_of_element_located(
-                                                (By.XPATH, f"//input[@placeholder='{field_selector}']")
-                                            )
-                                        )
-                                    except (TimeoutException, NoSuchElementException):
-                                        # Last attempt - try finding by partial text match in label
-                                        try:
-                                            # Find label with text containing field name
-                                            label = WebDriverWait(driver, 2).until(
-                                                EC.presence_of_element_located(
-                                                    (By.XPATH, f"//label[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{field_name.lower()}')]")
-                                                )
-                                            )
-                                            # Get the for attribute and find the corresponding input
-                                            input_id = label.get_attribute("for")
-                                            if input_id:
-                                                field_element = driver.find_element(By.ID, input_id)
-                                            else:
-                                                # If no 'for' attribute, look for input inside label
-                                                field_element = label.find_element(By.TAG_NAME, "input")
-                                        except (TimeoutException, NoSuchElementException):
-                                            logger.error(f"Could not find field '{field_name}' with any method")
-                                            all_fields_found = False
-                                            continue
-                        
-                        logger.info(f"Found field '{field_name}'")
-                        
-                        # Scroll to the element
-                        try:
-                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", field_element)
-                        except Exception as e:
-                            logger.warning(f"Failed to scroll to element: {str(e)}")
-                        
-                        # Use special handling for password fields - they often have different behavior
-                        is_password = field_element.get_attribute("type") == "password" or "password" in field_name.lower()
-                        
-                        # Clear and input the payload
-                        field_element.click()  # Ensure focus
-                        field_element.clear()
-                        
-                        # Use the exact payload as provided without any modifications
-                        field_value = payload
-                        
-                        # Send payload as a single operation instead of character-by-character
-                        field_element.send_keys(field_value)
-                        
-                        logger.info(f"Filled field '{field_name}' with {'payload' if not is_password else 'password payload'}")
-                        
-                    except Exception as e:
-                        logger.error(f"Error filling field '{field_name}': {str(e)}")
+                    if field_name == 'form_container':
+                        continue
+
+                    if not field_selector or not isinstance(field_selector, str):
+                        logger.error(f"Invalid selector for field '{field_name}': {field_selector}")
                         all_fields_found = False
-                
-                # Check if all fields were found and filled
+                        continue
+
+                    logger.info(f"Looking for field '{field_name}' with selector '{field_selector}'")
+                    try:
+                        field_element = WebDriverWait(driver, 3).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, field_selector))
+                        )
+
+                        if not field_element.is_displayed() or not field_element.is_enabled():
+                            logger.warning(f"Field '{field_name}' found but not interactable")
+                            all_fields_found = False
+                            continue
+
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", field_element)
+                        time.sleep(0.5)
+
+                        WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, field_selector))
+                        )
+
+                        field_element.click()
+                        field_element.clear()
+                        field_element.send_keys(payload)
+                        logger.info(f"Filled field '{field_name}' with payload: {payload}")
+                        result['payloads_used'][field_name] = payload
+                        last_field_element = field_element
+
+                    except Exception as e:
+                        logger.error(f"Error processing field '{field_name}': {str(e)}")
+                        all_fields_found = False
+                        continue
+
                 if not all_fields_found:
-                    if attempt == max_retries - 1:  # If this is the last attempt
-                        result['error_message'] = f"Could not find all form fields after {max_retries} attempts"
+                    if attempt == max_retries - 1:
+                        result['error_message'] = "Could not find or interact with all form fields"
                         return self._format_result(result)
                     else:
-                        logger.info("Retrying after not finding all fields...")
-                        time.sleep(2)  # Wait before retrying
-                        continue  # Try again
-                
-                # Handle any alerts or popups that may have appeared during input
-                self._handle_alerts_and_popups(driver, popup_timeout)
-                
-                # Now try to submit the form
-                logger.info("Attempting to submit the form")
-                
-                # 1. First try: Look for submit button
-                submit_button = None
-                submit_selectors = [
-                    "button[type='submit']", "input[type='submit']", 
-                    "button.submit", "input.submit", 
-                    "button.login", "button.sign-in", "button.signin",
-                    "button:contains('Login')", "button:contains('Sign In')", "button:contains('Submit')",
-                    "a.login-button", "a.submit-button"
-                ]
-                
-                for submit_selector in submit_selectors:
-                    try:
-                        submit_button = WebDriverWait(driver, 2).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, submit_selector))
-                        )
-                        logger.info(f"Found submit button with selector: {submit_selector}")
-                        break
-                    except (TimeoutException, NoSuchElementException):
+                        logger.info("Retrying due to missing or invalid fields")
+                        time.sleep(0.5)
                         continue
-                
-                # If still not found, try XPath
-                if not submit_button:
-                    xpath_selectors = [
-                        "//button[contains(text(), 'Login')]",
-                        "//button[contains(text(), 'Sign In')]", 
-                        "//button[contains(text(), 'Submit')]",
-                        "//input[@value='Login']",
-                        "//input[@value='Sign In']",
-                        "//input[@value='Submit']"
+
+                logger.info("Attempting to submit the form")
+                submit_success = False
+
+                try:
+                    submit_button = None
+                    submit_selectors = [
+                        'button[type="submit"]', 'input[type="submit"]',
+                        '.submit-button', '#submit', 'button.login-button', 'button.signin-button'
                     ]
-                    for xpath in xpath_selectors:
+
+                    for selector in submit_selectors:
                         try:
-                            submit_button = WebDriverWait(driver, 2).until(
-                                EC.element_to_be_clickable((By.XPATH, xpath))
-                            )
-                            logger.info(f"Found submit button with XPath: {xpath}")
-                            break
-                        except (TimeoutException, NoSuchElementException):
+                            submit_button = driver.find_element(By.CSS_SELECTOR, selector)
+                            if submit_button.is_displayed() and submit_button.is_enabled():
+                                logger.info(f"Found submit button with selector: {selector}")
+                                submit_button.click()
+                                submit_success = True
+                                break
+                        except:
                             continue
-                
-                success = False
-                
-                # 2. Click submit button if found
-                if submit_button:
-                    try:
-                        logger.info("Clicking submit button")
-                        submit_button.click()
-                        success = True
-                    except Exception as e:
-                        logger.warning(f"Submit button click failed: {str(e)}")
-                
-                # 3. If no submit button or click failed, try pressing Enter on the last field
-                if not success:
-                    try:
-                        logger.info("Submitting form by pressing Enter key")
-                        field_element.send_keys(Keys.RETURN)  # Press enter on the last field we interacted with
-                        success = True
-                    except Exception as e:
-                        logger.warning(f"Enter key submission failed: {str(e)}")
-                
-                # 4. If that also failed, look for a form and submit it via JavaScript
-                if not success:
-                    try:
-                        logger.info("Attempting form submission via JavaScript")
-                        # Look for forms
-                        forms = driver.find_elements(By.TAG_NAME, "form")
-                        if forms:
-                            logger.info(f"Found {len(forms)} forms, attempting to submit the first one")
-                            driver.execute_script("arguments[0].submit();", forms[0])
-                            success = True
-                    except Exception as e:
-                        logger.warning(f"JavaScript form submission failed: {str(e)}")
-                
-                # Handle any alerts or popups that may have appeared after submission
+
+                    if not submit_success and last_field_element:
+                        logger.info("No submit button found, pressing Enter on last field")
+                        last_field_element.send_keys(Keys.RETURN)
+                        submit_success = True
+
+                    if not submit_success:
+                        logger.info("Trying to submit form via JavaScript")
+                        driver.execute_script("arguments[0].form.submit();", last_field_element)
+                        submit_success = True
+
+                except Exception as e:
+                    logger.error(f"Error during form submission: {str(e)}")
+
                 self._handle_alerts_and_popups(driver, popup_timeout)
-                
-                # Wait for the page to load after submission
-                logger.info("Waiting for response...")
                 time.sleep(1)
-                
-                # Handle any final alerts or popups
                 self._handle_alerts_and_popups(driver, popup_timeout)
-                
-                # Capture the response
+
                 result['response_text'] = driver.page_source
                 result['success'] = True
                 logger.info("Response captured successfully")
-                
-                # Capture a screenshot if requested
-                if capture_screenshot:
-                    logger.info("Capturing screenshot")
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    screenshot_dir = "screenshots"
-                    os.makedirs(screenshot_dir, exist_ok=True)
-                    screenshot_path = f"{screenshot_dir}/form_injection_{timestamp}.png"
-                    driver.save_screenshot(screenshot_path)
-                    result['screenshot_path'] = screenshot_path
-                    logger.info(f"Screenshot saved to {screenshot_path}")
-                    
-                    # Also encode the screenshot as base64 for inline viewing
-                    with open(screenshot_path, "rb") as img_file:
-                        result['screenshot_base64'] = base64.b64encode(img_file.read()).decode()
-                
-                # Successful injection, break out of retry loop
                 break
-                
-            except UnexpectedAlertPresentException:
-                # Handle alerts that might have appeared unexpectedly
-                logger.warning("Unexpected alert detected during form fields injection")
-                try:
-                    alert = Alert(driver)
-                    logger.info(f"Alert text: {alert.text}")
-                    alert.accept()
-                    logger.info("Alert accepted")
-                except:
-                    logger.warning("Failed to handle unexpected alert")
-                
-                if attempt == max_retries - 1:  # If this is the last attempt
-                    result['error_message'] = "Unexpected alerts prevented successful form fields injection"
-                    return self._format_result(result)
-                else:
-                    logger.info("Retrying after handling unexpected alert...")
-                    time.sleep(2)  # Wait before retrying
-            
+
             except Exception as e:
                 logger.error(f"Error in form fields injection attempt {attempt+1}: {str(e)}")
-                if attempt == max_retries - 1:  # If this is the last attempt
+                if attempt == max_retries - 1:
                     result['error_message'] = str(e)
                     return self._format_result(result)
                 else:
                     logger.info(f"Retrying after error: {str(e)}")
-                    time.sleep(0.5)  # Wait before retrying
-        
-        # Format and return the result
-        return self._format_result(result)
+                    time.sleep(0.5)
+
+        formatted_result = "Firefox SQL Injection Execution Result\n\n"
+        formatted_result += f"Execution Status: {'Success' if result['success'] else 'Failed'}\n"
+
+        if result['error_message']:
+            formatted_result += f"Error: {result['error_message']}\n"
+
+        formatted_result += "\nPayloads Used:\n"
+        for field_name, used_payload in result['payloads_used'].items():
+            formatted_result += f"  {field_name}: {used_payload}\n"
+
+        if result['screenshot_path']:
+            formatted_result += f"\nScreenshot saved: {result['screenshot_path']}\n"
+
+        return formatted_result
+
 
     def _execute_injection(self, driver, entry_type, selector, selector_type, payload, capture_screenshot, max_retries, popup_timeout):
         result = {

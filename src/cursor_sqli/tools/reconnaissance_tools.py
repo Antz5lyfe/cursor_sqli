@@ -321,9 +321,18 @@ class FirefoxSeleniumScrapingTool(BaseTool):
             firefox_options.accept_insecure_certs = True
             firefox_options.set_preference("security.insecure_connection_text.enabled", False)
             
+            # Performance optimizations
+            firefox_options.set_preference("browser.cache.disk.enable", False)
+            firefox_options.set_preference("browser.cache.memory.enable", False)
+            firefox_options.set_preference("browser.cache.offline.enable", False)
+            firefox_options.set_preference("network.http.use-cache", False)
+            
             # Set up the WebDriver
             service = FirefoxService(GeckoDriverManager().install())
             driver = webdriver.Firefox(service=service, options=firefox_options)
+            
+            # Set shorter page load timeout
+            driver.set_page_load_timeout(10)
             
             # Navigate to the URL
             driver.get(url)
@@ -331,8 +340,13 @@ class FirefoxSeleniumScrapingTool(BaseTool):
             # Handle any initial popups or alerts
             self._handle_alerts_and_popups(driver, popup_timeout)
             
-            # Wait for the page to load
-            time.sleep(3)
+            # Wait for page load with dynamic check
+            try:
+                WebDriverWait(driver, 3).until(
+                    lambda d: d.execute_script('return document.readyState') == 'complete'
+                )
+            except TimeoutException:
+                logger.warning("Page load timeout, proceeding anyway")
             
             # Handle any popups that appeared after page load
             self._handle_alerts_and_popups(driver, popup_timeout)
@@ -346,12 +360,17 @@ class FirefoxSeleniumScrapingTool(BaseTool):
             # Find forms (both visible and hidden)
             forms = soup.find_all('form')
             forms_data = []
+            
+            # Basic test payloads
+            test_payloads = ["'", '"', "\\", "')", "'))", "';", '";', "--", "#", "/*"]
+            
             for i, form in enumerate(forms):
                 form_data = {
                     'id': form.get('id', f'dynamic_form_{i}'),
                     'method': form.get('method', 'Unknown'),
                     'action': form.get('action', 'Unknown'),
-                    'inputs': []
+                    'inputs': [],
+                    'vulnerable_fields': []  # Track potentially vulnerable fields
                 }
                 
                 # Find all inputs in the form
@@ -361,8 +380,57 @@ class FirefoxSeleniumScrapingTool(BaseTool):
                         'name': input_field.get('name', 'Unknown'),
                         'type': input_field.get('type', 'text'),
                         'id': input_field.get('id', 'Unknown'),
-                        'xpath': self._get_xpath(input_field)  # Include XPath for better selection in Firefox
+                        'xpath': self._get_xpath(input_field)
                     }
+                    
+                    # Test input field with basic payloads if it's text-based
+                    if input_data['type'] in ['text', 'password', 'email', 'search', 'tel', 'url']:
+                        try:
+                            # Find the actual element in the driver
+                            element = None
+                            try:
+                                element = driver.find_element(By.ID, input_data['id'])
+                            except:
+                                try:
+                                    element = driver.find_element(By.NAME, input_data['name'])
+                                except:
+                                    try:
+                                        element = driver.find_element(By.XPATH, input_data['xpath'])
+                                    except:
+                                        continue
+                            
+                            if element and element.is_displayed() and element.is_enabled():
+                                # Test each basic payload
+                                for payload in test_payloads:
+                                    try:
+                                        # Clear and send payload
+                                        element.clear()
+                                        element.send_keys(payload)
+                                        
+                                        # Check for common error messages or changes
+                                        page_content = driver.page_source.lower()
+                                        error_indicators = [
+                                            'sql', 'database', 'error', 'syntax', 'mysql', 
+                                            'postgresql', 'oracle', 'sqlite', 'odbc'
+                                        ]
+                                        
+                                        for indicator in error_indicators:
+                                            if indicator in page_content:
+                                                input_data['potentially_vulnerable'] = True
+                                                input_data['triggering_payload'] = payload
+                                                form_data['vulnerable_fields'].append(input_data)
+                                                break
+                                                
+                                        # Clear the field after testing
+                                        element.clear()
+                                        
+                                    except Exception as e:
+                                        logger.warning(f"Error testing payload {payload} on field {input_data['name']}: {str(e)}")
+                                        continue
+                        
+                        except Exception as e:
+                            logger.warning(f"Error testing field {input_data['name']}: {str(e)}")
+                    
                     form_data['inputs'].append(input_data)
                 
                 forms_data.append(form_data)
@@ -409,6 +477,13 @@ class FirefoxSeleniumScrapingTool(BaseTool):
                         result_str += f"      - Name: {input_field['name']}, Type: {input_field['type']}\n"
                         if 'xpath' in input_field:
                             result_str += f"        XPath: {input_field['xpath']}\n"
+                        if 'potentially_vulnerable' in input_field:
+                            result_str += f"        !!! POTENTIALLY VULNERABLE - Triggered by: {input_field['triggering_payload']}\n"
+                    
+                    if form['vulnerable_fields']:
+                        result_str += "    !!! Potentially Vulnerable Fields Found !!!\n"
+                        for field in form['vulnerable_fields']:
+                            result_str += f"      - {field['name']} (Type: {field['type']})\n"
             else:
                 result_str += "  No dynamic forms found\n"
             
@@ -454,82 +529,74 @@ class FirefoxSeleniumScrapingTool(BaseTool):
             driver: The Selenium WebDriver instance
             timeout: Maximum time to wait for alerts/popups
         """
-        # First, check for JavaScript alerts
+        # First, check for JavaScript alerts with shorter timeout
         try:
-            WebDriverWait(driver, timeout).until(EC.alert_is_present())
+            WebDriverWait(driver, 0.5).until(EC.alert_is_present())
             alert = Alert(driver)
             alert_text = alert.text
-            print(f"Alert detected during reconnaissance: {alert_text}")
+            logger.info(f"Alert detected: {alert_text}")
             alert.accept()
-            print("Alert accepted")
-            time.sleep(1)  # Brief pause after handling alert
+            logger.info("Alert accepted")
         except TimeoutException:
-            pass  # No alerts detected
+            logger.info("No JavaScript alerts detected")
         
-        # Common popup selectors
+        # Reduced list of most common popup selectors
         popup_selectors = [
             ".modal", "#modal", ".popup", "#popup", 
-            "[class*='modal']", "[class*='popup']", "[class*='dialog']",
-            ".cookie-banner", "#cookie-consent", "[class*='cookie']",
-            ".notification", "#notification", "[class*='notification']",
-            ".overlay", "#overlay", "[class*='overlay']"
+            "[class*='dialog']", ".cookie-banner", 
+            ".overlay", "#overlay"
         ]
         
-        # Check for modal popups
+        # Check for modal popups with faster timeouts
         for selector in popup_selectors:
             try:
-                popup = WebDriverWait(driver, timeout/2).until(
+                popup = WebDriverWait(driver, 0.5).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, selector))
                 )
                 
                 # Check if popup is visible
                 if popup.is_displayed():
-                    print(f"Popup detected with selector: {selector}")
+                    logger.info(f"Popup detected with selector: {selector}")
                     
-                    # Try to find close buttons with various common patterns
+                    # Try to find close buttons with most common patterns
                     close_selectors = [
-                        f"{selector} .close", f"{selector} .btn-close", f"{selector} .dismiss",
+                        f"{selector} .close", f"{selector} .btn-close",
                         f"{selector} button[class*='close']", f"{selector} [aria-label='Close']",
-                        f"{selector} button", f"{selector} .btn", f"{selector} a.close",
-                        f"{selector} [class*='close']", f"{selector} [title*='Close']",
-                        f"{selector} .x", f"{selector} .cancel"
+                        f"{selector} button"
                     ]
                     
                     popup_closed = False
                     for close_selector in close_selectors:
                         try:
-                            close_btn = WebDriverWait(driver, timeout/2).until(
+                            close_btn = WebDriverWait(driver, 0.2).until(
                                 EC.element_to_be_clickable((By.CSS_SELECTOR, close_selector))
                             )
-                            print(f"Found popup close button: {close_selector}")
+                            logger.info(f"Found popup close button: {close_selector}")
                             close_btn.click()
                             popup_closed = True
-                            print("Popup closed successfully")
-                            time.sleep(1)  # Brief pause after closing popup
+                            logger.info("Popup closed successfully")
                             break
                         except (TimeoutException, NoSuchElementException, ElementNotInteractableException):
                             continue
                     
                     # If we couldn't find a close button, try pressing Escape key
                     if not popup_closed:
-                        print("No close button found, trying Escape key")
+                        logger.info("No close button found, trying Escape key")
                         webdriver.ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-                        time.sleep(1)
             except (TimeoutException, NoSuchElementException):
                 continue
         
-        # Check for iframes that might contain popups
+        # Check for iframes that might contain popups with reduced timeout
         try:
             iframes = driver.find_elements(By.TAG_NAME, "iframe")
-            for i, iframe in enumerate(iframes):
+            for iframe in iframes:
                 try:
                     driver.switch_to.frame(iframe)
-                    self._handle_alerts_and_popups(driver, timeout/2)  # Reduced timeout for nested handling
+                    self._handle_alerts_and_popups(driver, 0.5)  # Reduced timeout for nested handling
                     driver.switch_to.default_content()
-                except Exception as e:
+                except Exception:
                     driver.switch_to.default_content()
-        except Exception as e:
-            # Ensure we're back to the main document
+        except Exception:
             driver.switch_to.default_content()
     
     def _get_xpath(self, element):

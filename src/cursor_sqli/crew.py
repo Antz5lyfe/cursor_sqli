@@ -24,6 +24,7 @@ class CursorSqli():
 
     agents: List[BaseAgent]
     tasks: List[Task]
+    _agent_cache = {}  # Cache to store agent instances
 
     # Learn more about YAML configuration files here:
     # Agents: https://docs.crewai.com/concepts/agents#yaml-configuration-recommended
@@ -33,85 +34,43 @@ class CursorSqli():
     # https://docs.crewai.com/concepts/agents#agent-tools
     @agent
     def reconnaissance_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['reconnaissance_agent'],
-            tools=[ScrapeWebsiteTool(), SeleniumScrapingTool(), FirefoxSeleniumScrapingTool()],
-            verbose=True
-        )
+        if 'reconnaissance_agent' not in self._agent_cache:
+            self._agent_cache['reconnaissance_agent'] = Agent(
+                config=self.agents_config['reconnaissance_agent'],
+                tools=[ScrapeWebsiteTool(), SeleniumScrapingTool(), FirefoxSeleniumScrapingTool()],
+                verbose=True
+            )
+        return self._agent_cache['reconnaissance_agent']
 
     @agent
     def scanner_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['scanner_agent'],
-            tools=[SQLInjectionScannerTool(), DatabaseIdentifierTool()],
-            verbose=True
-        )
+        if 'scanner_agent' not in self._agent_cache:
+            self._agent_cache['scanner_agent'] = Agent(
+                config=self.agents_config['scanner_agent'],
+                tools=[SQLInjectionScannerTool(), DatabaseIdentifierTool()],
+                verbose=True
+            )
+        return self._agent_cache['scanner_agent']
 
     @agent
     def payload_generator_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['payload_generator_agent'],
-            tools=[PayloadGeneratorTool(), WAFEvasionTool()],
-            verbose=True
-        )
+        if 'payload_generator_agent' not in self._agent_cache:
+            self._agent_cache['payload_generator_agent'] = Agent(
+                config=self.agents_config['payload_generator_agent'],
+                tools=[PayloadGeneratorTool(), WAFEvasionTool()],
+                verbose=True
+            )
+        return self._agent_cache['payload_generator_agent']
 
     @agent
     def executor_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config['executor_agent'],
-            tools=[BrowserAutomationTool(), ResponseAnalyzerTool(), FirefoxBrowserAutomationTool()],
-            # Adding a context message for proper tool usage
-            context="""
-            IMPORTANT: When using the FirefoxBrowserAutomationTool, always use the exact target URL from the task. 
-            Do NOT use placeholder URLs like "http://targetwebsite.com".
-            
-            ⚠️ CRITICAL: You MUST use one of these exact formats for entry_point to prevent "invalid type: map" errors:
-            
-            1. Auto-detection (PREFERRED, MOST RELIABLE):
-            ```
-            entry_point = {
-                'type': 'form_input'
-            }
-            ```
-            
-            2. Form fields with string selectors:
-            ```
-            entry_point = {
-                'type': 'form_input',
-                'form_fields': {
-                    'username': 'input[type="email"]',  
-                    'password': 'input[type="password"]'
-                }
-            }
-            ```
-            
-            3. Single selector (use only if needed):
-            ```
-            entry_point = {
-                'type': 'form_input',
-                'selector': 'input#username',  # Must be a string, not a dictionary
-                'selector_type': 'css'
-            }
-            ```
-            
-            COMMON ERRORS TO AVOID:
-            - DO NOT nest dictionaries inside the 'selector' field
-            - DO NOT use dictionary values where string values are expected
-            - If you see "invalid type: map, expected a string" error, switch to auto-detection format
-            
-            IMPORTANT ABOUT PAYLOADS:
-            - Custom payloads from custom_payloads.yaml will be used exactly as written
-            - Payloads are NOT modified for password fields - they are used exactly as provided
-            - If custom_payloads.yaml doesn't exist or is empty, use these common SQL injection payloads:
-              - "' OR '1'='1"
-              - "' OR '1'='1' --"
-              - "admin' --"
-              - "1' OR 1=1 --"
-            
-            Always set visible_mode to true when the --visible flag is provided with the command.
-            """,
-            verbose=True
-        )
+        if 'executor_agent' not in self._agent_cache:
+            self._agent_cache['executor_agent'] = Agent(
+                config=self.agents_config['executor_agent'],
+                tools=[BrowserAutomationTool(), FirefoxBrowserAutomationTool(), ResponseAnalyzerTool()],
+                verbose=True
+            )
+        return self._agent_cache['executor_agent']
 
     # To learn more about structured task outputs,
     # task dependencies, and task callbacks, check out the documentation:
@@ -152,5 +111,5 @@ class CursorSqli():
             tasks=self.tasks, # Automatically created by the @task decorator
             process=Process.sequential,
             verbose=True,
-            # process=Process.hierarchical, # In case you wanna use that instead https://docs.crewai.com/how-to/Hierarchical/
+            max_task_retries=0  # Prevent task retries
         )

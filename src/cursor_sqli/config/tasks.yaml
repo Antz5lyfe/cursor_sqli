@@ -2,7 +2,7 @@ reconnaissance_task:
   description: >
     Analyze the target website at {target_url} to gather detailed information about its structure and potential SQL injection points.
     Specifically:
-    1. Identify all entry points for SQL injection (forms, URL parameters, cookies, etc.) using both Chrome and Firefox browsers
+    1. Identify all entry points for SQL injection (forms, URL parameters, cookies, etc.)
     2. Map the website's structure and navigation paths
     3. Detect the presence of any web application firewalls (WAFs)
     4. Identify the technologies being used (server type, frameworks, etc.)
@@ -13,6 +13,7 @@ reconnaissance_task:
     - Detected security mechanisms (WAFs, input sanitization)
     - Identified technologies and frameworks
   agent: reconnaissance_agent
+  max_retries: 0  # Prevent retries
 
 scanning_task:
   description: >
@@ -30,6 +31,7 @@ scanning_task:
     - Vulnerability assessment for each entry point
   agent: scanner_agent
   dependencies: [reconnaissance_task]
+  max_retries: 0  # Prevent retries
 
 payload_generation_task:
   description: >
@@ -39,6 +41,9 @@ payload_generation_task:
     2. Create payloads for different attack goals (data extraction, authentication bypass, etc.)
     3. Encode payloads to evade WAFs if detected
     4. Optimize payloads for the specific vulnerability context
+
+    IF there are NO vulnerable points, the task should reccomend the use of "' OR '1'='1" as a payload for BOTH the username and password fields.
+
   expected_output: >
     A collection of SQL injection payloads including:
     - Database-specific injection strings
@@ -47,6 +52,7 @@ payload_generation_task:
     - Usage instructions for each payload
   agent: payload_generator_agent
   dependencies: [scanning_task]
+  max_retries: 0  # Prevent retries
 
 execution_task:
   description: >
@@ -71,3 +77,5 @@ execution_task:
     - Evidence of successful exploitation
   agent: executor_agent
   dependencies: [payload_generation_task]
+  max_retries: 0  # Prevent retries
+  output_file: sqli_report.md

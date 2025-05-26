@@ -28,7 +28,8 @@ crewai==0.118.0
 crewai-tools==0.42.2
 cryptography==44.0.2
 # Editable Git install with no remote (cursor_sqli==0.1.0)
--e c:\users\anton\onedrive\desktop\coding repos\crewai_cursor\cursor_sqli
+# -e c:\users\anton\onedrive\desktop\coding repos\crewai_cursor\cursor_sqli
+-e .
 dataclasses-json==0.6.7
 decorator==5.2.1
 Deprecated==1.2.18
@@ -178,7 +179,8 @@ sortedcontainers==2.4.0
 soupsieve==2.7
 SQLAlchemy==2.0.40
 # Editable install with no version control (sqli_crew==0.1.0)
--e c:\users\anton\onedrive\desktop\coding repos\crewai_cursor\cursor_sqli\src\sqli-crew\sqli_crew
+# -e c:\users\anton\onedrive\desktop\coding repos\crewai_cursor\cursor_sqli\src\sqli-crew\sqli_crew
+#-e src/sqli-crew/sqli_crew
 stack-data==0.6.3
 starlette==0.46.2
 sympy==1.13.3
